@@ -1,0 +1,172 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server:
+    name: Server (typecheck, test, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: server
+
+    services:
+      # Matches server/.env.test, so the same npm scripts work locally and in CI.
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: bookit
+          POSTGRES_PASSWORD: bookit_test
+          POSTGRES_DB: bookit_test
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U bookit -d bookit_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - run: npm ci
+
+      # The generated client is gitignored; generating needs no live database.
+      - name: Generate Prisma client
+        run: npx prisma generate
+        env:
+          DATABASE_URL: postgresql://bookit:bookit_test@localhost:5434/bookit_test
+
+      - run: npm run typecheck
+
+      - name: Apply migrations
+        run: npm run test:db:migrate
+
+      - run: npm test
+
+      - run: npm run build
+
+  client:
+    name: Client (lint, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: client
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - run: npm ci
+
+      - run: npm run lint
+
+      # `build` runs `tsc -b` first, so this is also the client typecheck.
+      - run: npm run build
+
+  e2e:
+    name: E2E (Playwright) and Lighthouse
+    # Needs the server and client jobs' checks to pass first; this job is slow.
+    needs: [server, client]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: bookit
+          POSTGRES_PASSWORD: bookit_e2e
+          POSTGRES_DB: bookit_e2e
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U bookit -d bookit_e2e"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+
+    # Read by the API started below (no .env file in CI). Emails are off.
+    env:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://bookit:bookit_e2e@localhost:5433/bookit_e2e
+      JWT_ACCESS_SECRET: e2e-access-secret-0123456789
+      RATE_LIMIT_MAX: "100000"
+      AUTH_RATE_LIMIT_MAX: "100000"
+      LOG_LEVEL: warn
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            server/package-lock.json
+            client/package-lock.json
+
+      - name: Install server
+        working-directory: server
+        run: npm ci && npx prisma generate
+
+      - name: Migrate and seed demo data
+        working-directory: server
+        run: npm run db:migrate && npm run db:seed
+
+      - name: Start API
+        working-directory: server
+        run: |
+          nohup npm start > ../api.log 2>&1 &
+          npx --yes wait-on --timeout 120000 http://localhost:5000/health
+
+      - name: Install client and Playwright's Chromium
+        working-directory: client
+        run: npm ci && npx playwright install --with-deps chromium
+
+      # Builds the client and serves it with `vite preview` on :4173;
+      # the API above is reused.
+      - name: Playwright
+        working-directory: client
+        run: npm run e2e
+        env:
+          CI: "true"
+          E2E_CHANNEL: chromium
+
+      # Public pages only (the app pages need a signed-in user).
+      - name: Lighthouse
+        working-directory: client
+        run: npx --yes @lhci/cli@0.15.x autorun
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-reports
+          path: |
+            api.log
+            client/test-results/
+            client/.lighthouseci/
+          retention-days: 14
+          if-no-files-found: ignore

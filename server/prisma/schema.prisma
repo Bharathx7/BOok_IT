@@ -1,0 +1,696 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id                      String                   @id @default(uuid())
+  email                   String                   @unique
+  passwordHash            String
+  name                    String
+  role                    UserRole                 @default(USER)
+  status                  UserStatus               @default(ACTIVE)
+  // Why an admin suspended or banned the account (shown to admins only).
+  statusReason            String?
+  statusChangedAt         DateTime?
+  emailVerifiedAt         DateTime?
+  phone                   String?
+  avatarUrl               String?
+  lastLoginAt             DateTime?
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  bookings                Booking[]
+  reviews                 Review[]
+  ownedVenues             Venue[]
+  refreshTokens           RefreshToken[]
+  verificationTokens      VerificationToken[]
+  notifications           Notification[]
+  notificationPreferences NotificationPreference[]
+  favorites               Favorite[]
+  waitlistEntries         WaitlistEntry[]
+  recurringBookings       RecurringBooking[]
+  participations          BookingParticipant[]
+  reviewReports           ReviewReport[]
+  auditLogs               AuditLog[]
+  couponsCreated          Coupon[]
+}
+
+// Who did what to which record. Written by the services for admin and
+// security-sensitive actions; never updated or deleted by the app.
+model AuditLog {
+  id         String   @id @default(uuid())
+  // Null for system actions (jobs).
+  actorId    String?
+  // Kept even if the actor's account is deleted later.
+  actorEmail String?
+  // e.g. "user.suspended", "venue.approved", "coupon.updated"
+  action     String
+  entityType String
+  entityId   String?
+  before     Json?
+  after      Json?
+  reason     String?
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([entityType, entityId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  type      NotificationType
+  title     String
+  body      String
+  // Small payload for the UI, e.g. { bookingId, venueId }.
+  data      Json?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
+}
+
+// Opt-outs only: a missing row means the notification is enabled.
+model NotificationPreference {
+  id      String              @id @default(uuid())
+  userId  String
+  type    NotificationType
+  channel NotificationChannel
+  enabled Boolean
+  user    User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type, channel])
+}
+
+// One row per issued refresh token. Tokens are rotated on every use; all
+// tokens from one login share a familyId so that reuse of an already-rotated
+// token (a sign of theft) can revoke the whole family.
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  familyId  String
+  expiresAt DateTime
+  revokedAt DateTime?
+  userAgent String?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+}
+
+// Single-use links sent by email. Only the SHA-256 hash is stored.
+model VerificationToken {
+  id        String                @id @default(uuid())
+  userId    String
+  type      VerificationTokenType
+  tokenHash String                @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime              @default(now())
+  user      User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+}
+
+model Venue {
+  id                 String             @id @default(uuid())
+  name               String
+  description        String?
+  category           String             @default("Other")
+  address            String?
+  city               String?
+  // Map pin; both set or both null.
+  latitude           Float?
+  longitude          Float?
+  // Sports played here, e.g. ["Football", "Cricket"]. category stays the main one.
+  sportTypes         String[]           @default([])
+  amenities          String[]           @default([])
+  rules              String?
+  // { mon: { open: "06:00", close: "23:00" } | null, ... } in venue local time.
+  openingHours       Json?
+  // Owners can hide a listing from search without deleting it.
+  isActive           Boolean            @default(true)
+  // Listings created by providers start PENDING (see createVenue) and are
+  // public only once an admin approves them. The column default is APPROVED
+  // so rows inserted directly (admins, seeds, tests) are live.
+  approvalStatus     VenueApprovalStatus @default(APPROVED)
+  rejectionReason    String?
+  reviewedAt         DateTime?
+  // Kept in sync when reviews are added, so search can sort by rating.
+  avgRating          Float              @default(0)
+  reviewCount        Int                @default(0)
+  pricePerHour       Decimal            @default(0)
+  timezone           String             @default("Asia/Kolkata")
+  // How long the owner has to confirm a PENDING booking before it expires
+  // and frees the time (capped at the booking's start). Default 24 hours.
+  pendingHoldMinutes Int                @default(1440)
+  // Bookings are made in steps of this many minutes (also the minimum length).
+  slotMinutes        Int                @default(60)
+  maxBookingMinutes  Int                @default(240)
+  // [{ "hoursBefore": 24, "refundPercent": 100 }, ...]; null = always full refund.
+  cancellationPolicy Json?
+  // PAY_ONLINE: customers pay when booking and the booking is confirmed once
+  // paid. PAY_AT_VENUE: requests wait for the owner, payment happens on site.
+  paymentMode        PaymentMode        @default(PAY_AT_VENUE)
+  ownerId            String
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  bookings           Booking[]
+  reviews            Review[]
+  availability       TimeSlot[]
+  owner              User               @relation(fields: [ownerId], references: [id])
+  images             VenueImage[]
+  slotTemplates      SlotTemplate[]
+  blackouts          BlackoutDate[]
+  pricingRules       PricingRule[]
+  waitlistEntries    WaitlistEntry[]
+  recurringBookings  RecurringBooking[]
+  favorites          Favorite[]
+  coupons            Coupon[]
+
+  // A full-text search index on name/description/address/city is created in
+  // SQL (migration phase3_discovery); Prisma can't express expression indexes.
+  @@index([isActive, city])
+  @@index([ownerId])
+  @@index([approvalStatus, createdAt])
+}
+
+model VenueImage {
+  id         String   @id @default(uuid())
+  venueId    String
+  url        String
+  // Location in the storage backend (local disk or Supabase Storage).
+  storageKey String
+  width      Int?
+  height     Int?
+  position   Int      @default(0)
+  isCover    Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  venue      Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@index([venueId, position])
+}
+
+model Favorite {
+  userId    String
+  venueId   String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  venue     Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@id([userId, venueId])
+  @@index([venueId])
+}
+
+model Booking {
+  id                String               @id @default(uuid())
+  userId            String
+  venueId           String
+  startTime         DateTime
+  endTime           DateTime
+  status            BookingStatus        @default(PENDING)
+  source            BookingSource        @default(ONLINE)
+  // Short human-readable code for check-in, e.g. BK-7F3K2.
+  bookingCode       String?              @unique
+  checkedInAt       DateTime?
+  noShow            Boolean              @default(false)
+  // Set on the new booking when a customer moves one.
+  rescheduledFromId String?              @unique
+  recurringGroupId  String?
+  // Walk-in / blocked time entered by the owner.
+  guestName         String?
+  guestPhone        String?
+  note              String?
+  // Price fixed at booking time, in rupees, with how it was calculated.
+  // totalPrice is what the customer pays: the breakdown minus discountAmount.
+  totalPrice        Decimal?
+  priceBreakdown    Json?
+  couponId          String?
+  discountAmount    Decimal?
+  cancelledAt       DateTime?
+  cancelledById     String?
+  refundPercent     Int?
+  refundAmount      Decimal?
+  // PENDING bookings still unconfirmed, and AWAITING_PAYMENT bookings still
+  // unpaid, at this time become EXPIRED.
+  expiresAt         DateTime?
+  reminder24hSentAt DateTime?
+  reminder2hSentAt  DateTime?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  user              User                 @relation(fields: [userId], references: [id])
+  venue             Venue                @relation(fields: [venueId], references: [id])
+  review            Review?
+  rescheduledFrom   Booking?             @relation("Reschedule", fields: [rescheduledFromId], references: [id])
+  rescheduledTo     Booking?             @relation("Reschedule")
+  recurringGroup    RecurringBooking?    @relation(fields: [recurringGroupId], references: [id])
+  coupon            Coupon?              @relation(fields: [couponId], references: [id])
+  participants      BookingParticipant[]
+  payments          Payment[]
+
+  // Overlapping AWAITING_PAYMENT/PENDING/CONFIRMED bookings for the same venue are also
+  // rejected by the "Booking_no_overlap" exclusion constraint (see migration
+  // 20260923000000_booking_overlap_constraints), which Prisma cannot express.
+  @@index([venueId, startTime, endTime])
+  @@index([userId, createdAt])
+  @@index([status, expiresAt])
+  @@index([status, startTime])
+  @@index([couponId])
+  @@index([createdAt])
+  // Per-venue lists newest first (provider bookings) and the 30-day popularity count.
+  @@index([venueId, createdAt])
+}
+
+model Review {
+  id                String         @id @default(uuid())
+  userId            String
+  venueId           String
+  bookingId         String         @unique
+  rating            Int
+  review            String?
+  providerReply     String?
+  providerRepliedAt DateTime?
+  // FLAGGED = reported and waiting for an admin; still shown until hidden.
+  // HIDDEN reviews are left out of the venue page and its rating.
+  status            ReviewStatus   @default(VISIBLE)
+  moderationNote    String?
+  moderatedAt       DateTime?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  booking           Booking        @relation(fields: [bookingId], references: [id])
+  user              User           @relation(fields: [userId], references: [id])
+  venue             Venue          @relation(fields: [venueId], references: [id])
+  reports           ReviewReport[]
+
+  // A venue's reviews, newest first.
+  @@index([venueId, createdAt])
+  @@index([userId])
+  @@index([status, updatedAt])
+}
+
+// A signed-in user saying a review breaks the rules. One per person per review.
+model ReviewReport {
+  id         String    @id @default(uuid())
+  reviewId   String
+  reporterId String
+  reason     String
+  // Set when an admin hides or restores the review.
+  resolvedAt DateTime?
+  createdAt  DateTime  @default(now())
+  review     Review    @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  reporter   User      @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+
+  @@unique([reviewId, reporterId])
+}
+
+// Discount codes. venueId null = valid at every venue.
+model Coupon {
+  id           String     @id @default(uuid())
+  // Stored upper-case; customers may type it in any case.
+  code         String     @unique
+  description  String?
+  type         CouponType
+  // PERCENT: 1-100. FLAT: rupees off.
+  value        Decimal
+  // PERCENT only: the most it can take off, in rupees.
+  maxDiscount  Decimal?
+  // Bookings that still count (not cancelled or expired) use it up.
+  maxUses      Int?
+  perUserLimit Int?
+  minAmount    Decimal?
+  validFrom    DateTime?
+  validTo      DateTime?
+  venueId      String?
+  isActive     Boolean    @default(true)
+  createdById  String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  venue        Venue?     @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  createdBy    User?      @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  bookings     Booking[]
+}
+
+// Platform-wide settings edited by admins; see services/settings.service.ts
+// for the known keys, their defaults and validation.
+model PlatformSetting {
+  key         String   @id
+  value       Json
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+}
+
+enum VenueApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum ReviewStatus {
+  VISIBLE
+  FLAGGED
+  HIDDEN
+}
+
+enum CouponType {
+  PERCENT
+  FLAT
+}
+
+// Overlapping slots for the same venue are rejected by the
+// "TimeSlot_no_overlap" exclusion constraint.
+model TimeSlot {
+  id         String        @id @default(uuid())
+  venueId    String
+  startTime  DateTime
+  endTime    DateTime
+  // Set when generated from a template.
+  templateId String?
+  venue      Venue         @relation(fields: [venueId], references: [id])
+  template   SlotTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+
+  @@index([venueId, startTime])
+}
+
+// Repeating opening hours, e.g. Mon-Fri 06:00-23:00, turned into TimeSlots.
+model SlotTemplate {
+  id         String     @id @default(uuid())
+  venueId    String
+  name       String?
+  // 0 = Sunday ... 6 = Saturday
+  daysOfWeek Int[]
+  // "HH:mm" in the venue's timezone
+  startTime  String
+  endTime    String
+  validFrom  DateTime?  @db.Date
+  validTo    DateTime?  @db.Date
+  isActive   Boolean    @default(true)
+  createdAt  DateTime   @default(now())
+  venue      Venue      @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  slots      TimeSlot[]
+
+  @@index([venueId])
+}
+
+// Closed periods (holidays, maintenance): no bookings, hidden from search.
+model BlackoutDate {
+  id        String   @id @default(uuid())
+  venueId   String
+  startTime DateTime
+  endTime   DateTime
+  reason    String?
+  createdAt DateTime @default(now())
+  venue     Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@index([venueId, startTime])
+}
+
+// Price overrides for certain days/times; the highest priority match wins.
+model PricingRule {
+  id         String          @id @default(uuid())
+  venueId    String
+  name       String
+  // Empty = every day. 0 = Sunday ... 6 = Saturday
+  daysOfWeek Int[]           @default([])
+  // "HH:mm" in the venue's timezone; endTime "24:00" allowed
+  startTime  String
+  endTime    String
+  validFrom  DateTime?       @db.Date
+  validTo    DateTime?       @db.Date
+  type       PricingRuleType
+  // FIXED: rupees per hour. MULTIPLIER: times the base price.
+  value      Decimal
+  priority   Int             @default(0)
+  isActive   Boolean         @default(true)
+  createdAt  DateTime        @default(now())
+  venue      Venue           @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@index([venueId])
+}
+
+// A weekly series, e.g. every Tuesday 19:00 for 8 weeks. Each week is its own Booking.
+model RecurringBooking {
+  id              String    @id @default(uuid())
+  userId          String
+  venueId         String
+  // 0 = Sunday ... 6 = Saturday, venue local time
+  weekday         Int
+  startTime       String
+  durationMinutes Int
+  weeks           Int
+  firstDate       DateTime  @db.Date
+  createdAt       DateTime  @default(now())
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  venue           Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  bookings        Booking[]
+
+  @@index([userId])
+}
+
+// Someone waiting for a busy time to free up. Notified first-come first-served.
+model WaitlistEntry {
+  id         String         @id @default(uuid())
+  userId     String
+  venueId    String
+  startTime  DateTime
+  endTime    DateTime
+  status     WaitlistStatus @default(WAITING)
+  notifiedAt DateTime?
+  createdAt  DateTime       @default(now())
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  venue      Venue          @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@index([venueId, status, startTime])
+  @@index([userId])
+}
+
+enum WaitlistStatus {
+  WAITING
+  NOTIFIED
+  BOOKED
+  EXPIRED
+  CANCELLED
+}
+
+// Friends invited to a booking by email.
+model BookingParticipant {
+  id          String            @id @default(uuid())
+  bookingId   String
+  email       String
+  name        String?
+  userId      String?
+  status      ParticipantStatus @default(INVITED)
+  // SHA-256 of the invite link token.
+  inviteToken String            @unique
+  respondedAt DateTime?
+  createdAt   DateTime          @default(now())
+  booking     Booking           @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  user        User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([bookingId, email])
+}
+
+enum ParticipantStatus {
+  INVITED
+  ACCEPTED
+  DECLINED
+}
+
+enum PricingRuleType {
+  FIXED
+  MULTIPLIER
+}
+
+enum BookingSource {
+  ONLINE
+  WALK_IN
+  BLOCK
+}
+
+enum UserRole {
+  USER
+  PROVIDER
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  BANNED
+}
+
+enum VerificationTokenType {
+  EMAIL_VERIFY
+  PASSWORD_RESET
+}
+
+enum BookingStatus {
+  // Pay-online venues: holds the time for a few minutes while the customer pays.
+  AWAITING_PAYMENT
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  EXPIRED
+}
+
+enum NotificationType {
+  BOOKING_REQUESTED
+  BOOKING_CONFIRMED
+  BOOKING_CANCELLED
+  BOOKING_COMPLETED
+  BOOKING_EXPIRED
+  BOOKING_REMINDER
+  BOOKING_RESCHEDULED
+  WAITLIST_AVAILABLE
+  VENUE_REVIEWED
+  PAYMENT_REFUNDED
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+}
+
+enum PaymentMode {
+  PAY_AT_VENUE
+  PAY_ONLINE
+}
+
+// One attempt to pay for a booking: a gateway order and, once the customer
+// pays, the gateway payment. All amounts are in paise (1 rupee = 100 paise).
+model Payment {
+  id               String        @id @default(uuid())
+  bookingId        String
+  userId           String
+  amountPaise      Int
+  currency         String        @default("INR")
+  // "razorpay", or "fake" in development and tests.
+  gateway          String
+  gatewayOrderId   String        @unique
+  gatewayPaymentId String?       @unique
+  status           PaymentStatus @default(CREATED)
+  // card, upi, netbanking, wallet... as reported by the gateway.
+  method           String?
+  failureReason    String?
+  capturedAt       DateTime?
+  refundedPaise    Int           @default(0)
+  // Last payment entity seen from the gateway, for support and reconciliation.
+  raw              Json?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  booking          Booking       @relation(fields: [bookingId], references: [id])
+  refunds          Refund[]
+  ledgerEntries    LedgerEntry[]
+
+  @@index([bookingId])
+  @@index([status, createdAt])
+  @@index([createdAt])
+}
+
+enum PaymentStatus {
+  CREATED
+  AUTHORIZED
+  CAPTURED
+  FAILED
+  PARTIALLY_REFUNDED
+  REFUNDED
+}
+
+// Money going back to the customer. Created when a paid booking is cancelled
+// (or paid too late to keep), then sent to the gateway by a retried job.
+model Refund {
+  id              String       @id @default(uuid())
+  paymentId       String
+  amountPaise     Int
+  reason          String
+  status          RefundStatus @default(PENDING)
+  gatewayRefundId String?      @unique
+  failureReason   String?
+  // How many times sending it to the gateway failed.
+  attempts        Int          @default(0)
+  processedAt     DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  payment         Payment      @relation(fields: [paymentId], references: [id])
+  ledgerEntry     LedgerEntry?
+
+  @@index([paymentId])
+  @@index([status, createdAt])
+}
+
+enum RefundStatus {
+  PENDING
+  PROCESSED
+  FAILED
+}
+
+// Every webhook delivery, keyed by the gateway's event id so a retried
+// delivery is processed once.
+model WebhookEvent {
+  id          String    @id
+  gateway     String
+  event       String
+  payload     Json
+  processedAt DateTime?
+  error       String?
+  receivedAt  DateTime  @default(now())
+
+  @@index([receivedAt])
+}
+
+// The provider's side of each payment: a SALE when it's captured, a REFUND
+// (negative amounts) when money goes back. Commission is the platform's cut.
+model LedgerEntry {
+  id                 String     @id @default(uuid())
+  type               LedgerType
+  providerId         String
+  venueId            String
+  bookingId          String
+  paymentId          String
+  refundId           String?    @unique
+  grossPaise         Int
+  commissionPaise    Int
+  providerSharePaise Int
+  // Set once the provider's share has been paid out.
+  payoutId           String?
+  createdAt          DateTime   @default(now())
+  payment            Payment    @relation(fields: [paymentId], references: [id])
+  refund             Refund?    @relation(fields: [refundId], references: [id])
+  payout             Payout?    @relation(fields: [payoutId], references: [id])
+
+  @@index([providerId, createdAt])
+  @@index([payoutId])
+}
+
+enum LedgerType {
+  SALE
+  REFUND
+}
+
+// A transfer of a provider's earnings, recorded by an admin (bank transfer
+// reference). Covers the ledger entries that point at it.
+model Payout {
+  id          String        @id @default(uuid())
+  providerId  String
+  amountPaise Int
+  reference   String?
+  note        String?
+  createdById String?
+  createdAt   DateTime      @default(now())
+  entries     LedgerEntry[]
+
+  @@index([providerId, createdAt])
+}

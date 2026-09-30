@@ -1,0 +1,261 @@
+@import "tailwindcss";
+
+/* dark: variants follow the .dark class on <html> (set before first paint in index.html). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  --font-display: "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  /* Brand: indigo. brand-600 is the primary action colour (white text on it
+     is 6.3:1); brand-700 is for text and hover states. */
+  --color-brand-50: #eef2ff;
+  --color-brand-100: #e0e7ff;
+  --color-brand-200: #c7d2fe;
+  --color-brand-300: #a5b4fc;
+  --color-brand-400: #818cf8;
+  --color-brand-500: #6366f1;
+  --color-brand-600: #4f46e5;
+  --color-brand-700: #4338ca;
+  --color-brand-800: #3730a3;
+  --color-brand-900: #312e81;
+  --color-brand-950: #1e1b4b;
+  --color-brand: #4f46e5;
+  --color-brand-dark: #4338ca;
+
+  --color-canvas: #f6f7fb;
+  --color-sidebar: #0f172a;
+  --color-sidebar-raised: #1e293b;
+  --color-sidebar-muted: #94a3b8;
+
+  /* Accessibility: Tailwind's default slate-400/500 fall below WCAG AA
+     contrast (4.5:1) for text on white and on the canvas. These are the
+     nearest shades that pass. */
+  --color-slate-400: #64748b;
+  --color-slate-500: #556274;
+
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px rgb(15 23 42 / 0.06);
+  --shadow-raised: 0 4px 6px -1px rgb(15 23 42 / 0.06), 0 12px 24px -8px rgb(15 23 42 / 0.12);
+  --shadow-brand: 0 1px 2px rgb(67 56 202 / 0.25), 0 4px 12px -2px rgb(79 70 229 / 0.35);
+}
+
+:root {
+  font-family: var(--font-sans);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  color: var(--color-slate-900);
+  background: var(--color-canvas);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: var(--color-canvas);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+/* Tailwind v4 dropped the pointer cursor on buttons; clickable things should
+   still look clickable. */
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+select:not(:disabled),
+summary,
+label[for],
+input[type="checkbox"]:not(:disabled),
+input[type="radio"]:not(:disabled) {
+  cursor: pointer;
+}
+
+/* Horizontally scrolling rows (e.g. filter chips) without a visible bar. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Numbers in stats and tables line up. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* A visible focus ring for keyboard users on every control. */
+:focus-visible {
+  outline: 2px solid var(--color-brand-500);
+  outline-offset: 2px;
+}
+
+/* Subtle page entrance. */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+/* "backwards", not "both": a transform left on the page after the animation
+   would pin position: fixed children (bottom bars, dialogs) to the page
+   instead of the screen. */
+.animate-rise {
+  animation: rise-in 0.25s ease-out backwards;
+}
+
+/* Side sheet: the panel slides in, the backdrop fades. */
+@keyframes slide-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: none;
+  }
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.animate-slide-in {
+  animation: slide-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.animate-fade {
+  animation: fade 0.2s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Dark theme
+ *
+ * The pages are written with light-theme classes (bg-white, text-slate-900,
+ * bg-brand-50 ...). Instead of a dark: twin for each, the dark theme swaps the
+ * palette underneath: the slate scale is inverted (so text, borders and
+ * subtle fills all follow), accent tints become dim translucent fills, and a
+ * few classes that must not simply invert are set explicitly below.
+ * ------------------------------------------------------------------------- */
+.dark {
+  color-scheme: dark;
+  --surface: #111827;
+
+  --color-canvas: #0b1020;
+  --color-sidebar: #070b16;
+  --color-sidebar-raised: #111a2e;
+  --color-slate-50: #172033;
+  --color-slate-100: #1c263b;
+  --color-slate-200: #28344d;
+  --color-slate-300: #3a4763;
+  --color-slate-400: #8a97b0;
+  --color-slate-500: #a3aec4;
+  --color-slate-600: #bec7d8;
+  --color-slate-700: #d3dae6;
+  --color-slate-800: #e4e9f1;
+  --color-slate-900: #f3f6fb;
+
+  --color-brand-50: rgb(129 140 248 / 0.12);
+  --color-brand-100: rgb(129 140 248 / 0.2);
+  --color-brand-200: rgb(129 140 248 / 0.32);
+  --color-amber-50: rgb(251 191 36 / 0.1);
+  --color-amber-100: rgb(251 191 36 / 0.18);
+  --color-amber-200: rgb(251 191 36 / 0.3);
+  --color-rose-50: rgb(251 113 133 / 0.1);
+  --color-rose-100: rgb(251 113 133 / 0.18);
+  --color-rose-200: rgb(251 113 133 / 0.3);
+  --color-sky-50: rgb(56 189 248 / 0.1);
+  --color-sky-100: rgb(56 189 248 / 0.18);
+  --color-emerald-50: rgb(52 211 153 / 0.1);
+  --color-emerald-100: rgb(52 211 153 / 0.18);
+  --color-violet-100: rgb(167 139 250 / 0.18);
+
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-raised: 0 12px 24px -8px rgb(0 0 0 / 0.5);
+}
+
+/* Unlayered, so these beat the utility classes they adjust. */
+.dark .bg-white,
+.dark .hover\:bg-white:hover {
+  background-color: var(--surface);
+}
+.dark .bg-white\/90 {
+  background-color: rgb(17 24 39 / 0.9);
+}
+.dark .bg-white\/80 {
+  background-color: rgb(17 24 39 / 0.8);
+}
+/* Tooltips and dark badges stay dark with white text. */
+.dark .bg-slate-900,
+.dark .bg-slate-800 {
+  background-color: #030712;
+}
+.dark .bg-slate-800\/80 {
+  background-color: rgb(3 7 18 / 0.8);
+}
+/* Dark accent text used on light tints: lighten it for the dark background. */
+.dark :is(.text-brand-600, .text-brand-700, .text-brand-800, .text-brand-900, .hover\:text-brand-700:hover) {
+  color: #a5b4fc;
+}
+.dark :is(.text-amber-700, .text-amber-800, .text-amber-900) {
+  color: #fcd34d;
+}
+.dark :is(.text-rose-600, .text-rose-700, .text-rose-800, .hover\:text-rose-700:hover) {
+  color: #fda4af;
+}
+.dark :is(.text-sky-700, .text-sky-800, .text-sky-900) {
+  color: #7dd3fc;
+}
+.dark :is(.text-emerald-700, .text-emerald-800) {
+  color: #6ee7b7;
+}
+.dark :is(.text-violet-700, .text-violet-800, .text-violet-900) {
+  color: #c4b5fd;
+}
+/* Primary buttons darken on hover in light mode; brighten them instead. */
+.dark .hover\:bg-brand-700:hover {
+  background-color: #6366f1;
+}
+/* Map tiles have no dark variant; dim them slightly. */
+.dark .leaflet-tile-pane {
+  filter: brightness(0.8) contrast(1.1);
+}
+/* The sidebar and sign-in panel are dark in both themes: keep light-theme greys there. */
+.bg-sidebar,
+.dark .bg-sidebar {
+  --color-slate-200: #e2e8f0;
+  --color-slate-300: #cbd5e1;
+  --color-slate-400: #94a3b8;
+}
+
+/* Letter spacing breaks up Devanagari conjuncts; keep it for Latin text only. */
+html:lang(hi) [class*="tracking-"] {
+  letter-spacing: normal;
+}

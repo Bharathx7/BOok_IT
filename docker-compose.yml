@@ -1,0 +1,29 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: bookit-postgres
+    environment:
+      POSTGRES_USER: bookit
+      POSTGRES_PASSWORD: bookit123
+      POSTGRES_DB: bookit
+    ports:
+      - "5433:5432"
+
+  # Throwaway database for automated tests (data lives in memory only).
+  # Start with: npm run test:db:up  (from server/)
+  postgres-test:
+    image: postgres:17
+    container_name: bookit-postgres-test
+    environment:
+      POSTGRES_USER: bookit
+      POSTGRES_PASSWORD: bookit_test
+      POSTGRES_DB: bookit_test
+    ports:
+      - "5434:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bookit -d bookit_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
